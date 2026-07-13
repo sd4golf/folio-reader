@@ -1,7 +1,7 @@
 {
   "name": "folio-local-reader",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,11 +10,15 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
+    "jszip": "^3.10.1",
     "lucide-react": "latest",
+    "mammoth": "^1.12.0",
+    "marked": "^18.0.6",
     "pdfjs-dist": "latest",
     "react": "latest",
     "react-dom": "latest",
     "react-pageflip": "^2.0.3",
+    "tesseract.js": "^7.0.0",
     "typescript": "latest",
     "vite": "latest"
   }
