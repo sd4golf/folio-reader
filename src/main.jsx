@@ -103,7 +103,7 @@ function PageCanvas({ pdf, number, scale, onReady, onError, thumb = false }) {
     return () => { cancelled = true; task?.cancel(); textLayer?.cancel() };
   }, [pdf, number, scale, thumb]);
   if(thumb)return <canvas ref={canvas} className="thumb-canvas"/>;
-  return <div ref={renderRef} className="page-render"><canvas ref={canvas} className="page-canvas"/><div ref={textLayerRef} className="textLayer" onPointerDown={event=>event.stopPropagation()} onMouseDown={event=>event.stopPropagation()}/></div>;
+  return <div ref={renderRef} className="page-render"><canvas ref={canvas} className="page-canvas"/><div ref={textLayerRef} className="textLayer"/></div>;
 }
 
 function DocumentPage({pdf, content, number, scale=1, thumb=false, onError}) {
@@ -150,6 +150,7 @@ function Sidebar({ pdf, content, pageCount, current, go, open, tab, setTab, sear
 
 function Reader({ file, onClose, documents, onOpenDocument, onAddDocument, onCloseDocument }) {
   const [pdf, setPdf] = useState(null), [content, setContent] = useState([]), [page, setPage] = useState(1), [zoom, setZoom] = useState(1);
+  const [pan,setPan] = useState({x:0,y:0}), [panning,setPanning] = useState(false);
   const [sidebar, setSidebar] = useState(true), [tab, setTab] = useState('pages'), [spread, setSpread] = useState(true);
   const [dark, setDark] = useState(false), [grayscale, setGrayscale] = useState(false), [loading, setLoading] = useState(true);
   const [textView,setTextView] = useState(false);
@@ -157,7 +158,7 @@ function Reader({ file, onClose, documents, onOpenDocument, onAddDocument, onClo
   const [libraryOpen, setLibraryOpen] = useState(false), [libraryQuery, setLibraryQuery] = useState('');
   const [outline,setOutline] = useState([]), [bookmarks,setBookmarks] = useState(()=>JSON.parse(localStorage.getItem(`folio:bookmarks:${file.name}:${file.size}`)||'[]'));
   const [ocrState,setOcrState] = useState({page:null,status:'',progress:0,error:''});
-  const [searchIndex, setSearchIndex] = useState([]); const rootRef = useRef(), bookRef = useRef(), addFileRef = useRef(), ocrWorkerRef = useRef();
+  const [searchIndex, setSearchIndex] = useState([]); const rootRef = useRef(), bookRef = useRef(), addFileRef = useRef(), ocrWorkerRef = useRef(), panRef = useRef();
   const downloadUrl = useMemo(() => URL.createObjectURL(file), [file]);
   const maxPage = pdf?.numPages || content.length || 1;
   const readProgress = maxPage > 1 ? (page - 1) / (maxPage - 1) : .5;
@@ -207,6 +208,10 @@ function Reader({ file, onClose, documents, onOpenDocument, onAddDocument, onClo
   },[page,maxPage,textView]);
   useEffect(()=>{const fn=e=>{if(e.target.tagName==='INPUT')return;if(e.key==='ArrowRight'||e.key==='PageDown')go(page+(spread?2:1));if(e.key==='ArrowLeft'||e.key==='PageUp')go(page-(spread?2:1));if(e.key==='Home')go(1);if(e.key==='End')go(maxPage);if((e.ctrlKey||e.metaKey)&&e.key==='f'){e.preventDefault();setSidebar(true);setTab('search')}};addEventListener('keydown',fn);return()=>removeEventListener('keydown',fn)},[go,page,spread,maxPage]);
   useEffect(()=>{const frame=requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));const timer=setTimeout(()=>window.dispatchEvent(new Event('resize')),180);return()=>{cancelAnimationFrame(frame);clearTimeout(timer)}},[sidebar,spread]);
+  useEffect(()=>{if(zoom<=1)setPan({x:0,y:0})},[zoom]);
+  const startPan=useCallback(event=>{if(zoom<=1||event.button!==0||event.target.closest('button,a,input,.bottom-bar,.stage-top,.page-arrow'))return;event.preventDefault();event.currentTarget.setPointerCapture(event.pointerId);panRef.current={x:event.clientX,y:event.clientY,startX:pan.x,startY:pan.y};setPanning(true)},[zoom,pan]);
+  const movePan=useCallback(event=>{if(!panRef.current)return;const wrap=rootRef.current?.querySelector('.flipbook-wrap'),maxX=Math.max(0,(wrap?.offsetWidth||0)*(zoom-1)/2),maxY=Math.max(0,(wrap?.offsetHeight||0)*(zoom-1)/2),nextX=panRef.current.startX+event.clientX-panRef.current.x,nextY=panRef.current.startY+event.clientY-panRef.current.y;setPan({x:Math.max(-maxX,Math.min(maxX,nextX)),y:Math.max(-maxY,Math.min(maxY,nextY))})},[zoom]);
+  const stopPan=useCallback(()=>{panRef.current=null;setPanning(false)},[]);
   useEffect(()=>{
     let observer, frame=requestAnimationFrame(()=>{
       const book=rootRef.current?.querySelector('.natural-book'),wrap=rootRef.current?.querySelector('.flipbook-wrap');if(!book||!wrap)return;
@@ -239,7 +244,7 @@ function Reader({ file, onClose, documents, onOpenDocument, onAddDocument, onClo
     </header>
     <div className="reader-body">
       <Sidebar {...{pdf,content,pageCount:maxPage,current:page,go,open:sidebar,tab,setTab,searchIndex,outline,bookmarks,toggleBookmark}}/>
-      <section className={`stage ${zoom>1?'zoomed':''}`}>
+      <section className={`stage ${zoom>1?'zoomed':''} ${panning?'panning':''}`} onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan}>
         <div className="stage-top">
           <IconButton label="Toggle sidebar" active={sidebar} onClick={()=>setSidebar(!sidebar)}>{sidebar?<PanelLeftClose/>:<PanelLeftOpen/>}</IconButton>
           <span className="stage-label">{spread?'SPREAD VIEW':'SINGLE PAGE'}</span>
@@ -248,7 +253,7 @@ function Reader({ file, onClose, documents, onOpenDocument, onAddDocument, onClo
         <button className="page-arrow left" disabled={page===1} onClick={()=>go(page-(spread?2:1))}><ChevronLeft/></button>
         {loading ? <div className="loading"><LoaderCircle/><span>Opening your document…</span></div> : error ? <div className="load-error"><FileText/><strong>We couldn't open this file</strong><span>{error}</span><button onClick={onClose}>Choose another document</button></div> : textView ? <div className={`selectable-view ${spread?'spread-text':''}`}>
           {[page,...(spread&&page<maxPage?[page+1]:[])].map(n=><article className="selectable-page" key={n}><header><span>Page {n}</span><button disabled={searchIndex[n-1]===undefined} onClick={()=>navigator.clipboard.writeText(searchIndex[n-1]||'')}>Copy page</button></header>{searchIndex[n-1]===undefined?<div className="no-page-text extracting"><LoaderCircle/><strong>Extracting page text…</strong><span>This usually takes only a moment.</span></div>:searchIndex[n-1]?.trim()?<p>{searchIndex[n-1]}</p>:<div className="no-page-text"><Type/><strong>No embedded text on this page</strong><span>Run local OCR to recognize this scanned page and make it searchable and selectable.</span>{ocrState.page===n?<><div className="ocr-progress"><i style={{width:`${Math.round(ocrState.progress*100)}%`}}/></div><small>{ocrState.status} {Math.round(ocrState.progress*100)}%</small></>:<button className="run-ocr" disabled={!!ocrState.page} onClick={()=>runOcr(n)}>Recognize this page</button>}{ocrState.error&&<small className="ocr-error">{ocrState.error}</small>}</div>}</article>)}
-        </div> : <div className={`flipbook-wrap ${spread?'is-spread':'is-single'}`} style={{'--zoom':zoom,'--left-stack':`${3+readProgress*12}px`,'--right-stack':`${3+(1-readProgress)*12}px`,'--left-shadow':`${8+readProgress*20}px`,'--right-shadow':`${8+(1-readProgress)*20}px`}}>
+        </div> : <div className={`flipbook-wrap ${spread?'is-spread':'is-single'}`} style={{'--zoom':zoom,'--pan-x':`${pan.x}px`,'--pan-y':`${pan.y}px`,'--left-stack':`${3+readProgress*12}px`,'--right-stack':`${3+(1-readProgress)*12}px`,'--left-shadow':`${8+readProgress*20}px`,'--right-shadow':`${8+(1-readProgress)*20}px`}}>
           <HTMLFlipBook key={`${spread?'spread':'single'}-${sidebar?'sidebar':'wide'}`} ref={bookRef} width={520} height={720} size="stretch" minWidth={260} maxWidth={620} minHeight={360} maxHeight={820} showCover={false} showPageCorners={false} usePortrait={!spread} drawShadow={true} maxShadowOpacity={.55} flippingTime={280} mobileScrollSupport={true} clickEventForward={false} useMouseEvents={false} startPage={Math.max(0,page-1)} onFlip={e=>setPage(e.data+1)} className="natural-book">
             {Array.from({length:maxPage},(_,i)=><FlipPage key={i+1} pdf={pdf} content={content} number={i+1} scale={1} onError={e=>setError(`Page rendering failed: ${e.message}`)}/>)}
           </HTMLFlipBook>
