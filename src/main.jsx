@@ -156,6 +156,7 @@ function Reader({ file, onClose, documents, onOpenDocument, onAddDocument, onClo
   const [textView,setTextView] = useState(false);
   const [error, setError] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false), [libraryQuery, setLibraryQuery] = useState('');
+  const [closingDocument,setClosingDocument] = useState(null);
   const [outline,setOutline] = useState([]), [bookmarks,setBookmarks] = useState(()=>JSON.parse(localStorage.getItem(`folio:bookmarks:${file.name}:${file.size}`)||'[]'));
   const [ocrState,setOcrState] = useState({page:null,status:'',progress:0,error:''});
   const [searchIndex, setSearchIndex] = useState([]); const rootRef = useRef(), bookRef = useRef(), addFileRef = useRef(), ocrWorkerRef = useRef(), panRef = useRef();
@@ -236,7 +237,7 @@ function Reader({ file, onClose, documents, onOpenDocument, onAddDocument, onClo
       {libraryOpen&&<div className="document-library">
         <div className="library-heading"><div><strong>Your documents</strong><small>{documents.length} document{documents.length===1?'':'s'} in your library</small></div><IconButton label="Close library" onClick={()=>setLibraryOpen(false)}><X/></IconButton></div>
         <div className="library-search"><Search/><input value={libraryQuery} onChange={e=>setLibraryQuery(e.target.value)} placeholder="Find a loaded document…"/></div>
-        <div className="library-list">{documents.filter(d=>d.file.name.toLowerCase().includes(libraryQuery.toLowerCase())).map(d=><div key={d.id} className={`library-row ${d.file===file?'selected':''}`}><button className="open-doc" onClick={()=>{onOpenDocument(d.id);setLibraryOpen(false)}}><span className="library-file-icon"><FileText/></span><span><strong>{d.file.name.replace(/\.[^.]+$/,'')}</strong><small>{fileExtension(d.file).toUpperCase()} · {(d.file.size/1048576).toFixed(1)} MB {d.file===file?'· Reading now':''}</small></span><ChevronRight/></button><button className="remove-doc" title={`Close ${d.file.name}`} aria-label={`Close ${d.file.name}`} onClick={()=>onCloseDocument(d.id)}><X/></button></div>)}</div>
+        <div className="library-list">{documents.filter(d=>d.file.name.toLowerCase().includes(libraryQuery.toLowerCase())).map(d=><div key={d.id} className={`library-entry ${d.file===file?'selected':''}`}><div className="library-row"><button className="open-doc" onClick={()=>{onOpenDocument(d.id);setLibraryOpen(false)}}><span className="library-file-icon"><FileText/></span><span><strong>{d.file.name.replace(/\.[^.]+$/,'')}</strong><small>{fileExtension(d.file).toUpperCase()} · {(d.file.size/1048576).toFixed(1)} MB {d.file===file?'· Reading now':''}</small></span><ChevronRight/></button><button className="remove-doc" title={`Close ${d.file.name}`} aria-label={`Close ${d.file.name}`} onClick={()=>setClosingDocument(closingDocument===d.id?null:d.id)}><X/></button></div>{closingDocument===d.id&&<div className="close-options"><strong>Remove this document?</strong><span>Choose whether to keep its reading data.</span><div><button onClick={()=>{onCloseDocument(d.id,false);setClosingDocument(null)}}>Close only</button><button className="delete-data" onClick={()=>{onCloseDocument(d.id,true);setClosingDocument(null)}}>Delete all data</button><button className="cancel-close" onClick={()=>setClosingDocument(null)}>Cancel</button></div></div>}</div>)}</div>
         <input ref={addFileRef} hidden type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.avif,.svg,.cbz,.epub,.docx,.md,.markdown,.txt,.html,.htm" onChange={e=>{onAddDocument([...e.target.files]);e.target.value='';setLibraryOpen(false)}}/>
         <button className="add-pdf" onClick={()=>addFileRef.current.click()}><Plus/> Open more documents</button>
         <p>Files stay in this browser session and never leave your device.</p>
@@ -279,14 +280,16 @@ function App(){
     const last=valid[valid.length-1];setActiveId(`${last.name}:${last.size}:${last.lastModified}`);
   },[]);
   const active=documents.find(d=>d.id===activeId);
-  const closeDocument=useCallback(id=>{
+  const closeDocument=useCallback((id,purge=false)=>{
     libraryDB.remove(id).catch(()=>{});
+    const record=documents.find(d=>d.id===id);
+    if(purge&&record){const base=`${record.file.name}:${record.file.size}`;localStorage.removeItem(`folio:${base}`);localStorage.removeItem(`folio:bookmarks:${base}`);for(let i=localStorage.length-1;i>=0;i--){const key=localStorage.key(i);if(key?.startsWith(`folio:ocr:${base}:`))localStorage.removeItem(key)}}
     setDocuments(current=>{
       const index=current.findIndex(d=>d.id===id);const next=current.filter(d=>d.id!==id);
       if(id===activeId)setActiveId(next[Math.min(Math.max(index,0),next.length-1)]?.id||null);
       return next;
     });
-  },[activeId]);
+  },[activeId,documents]);
   if(!libraryReady)return <div className="app-loading"><LoaderCircle/><span>Restoring your library…</span></div>;
   return active?<Reader key={active.id} file={active.file} documents={documents} onOpenDocument={setActiveId} onAddDocument={addDocuments} onCloseDocument={closeDocument} onClose={()=>setActiveId(null)}/>:<EmptyState onFile={addDocuments} dragging={dragging} setDragging={setDragging}/>;
 }
